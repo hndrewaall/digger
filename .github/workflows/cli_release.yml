@@ -31,3 +31,4 @@ jobs:
           md5sum: false
           asset_name: "digger-cli-Linux-X64"
           compress_assets: "OFF"
+          release_tag: andrew-test
