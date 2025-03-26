@@ -1,13 +1,10 @@
 ---
 name: release cli
 
-"on":
-  release:
-    branches:
-      - 'go'
-      - stacks-support
-    types:
-      - 'released'
+on:
+  pull_request:
+    branches: [ "stacks-support" ]
+    types: [ opened, synchronize ]
 
 jobs:
   binary:
