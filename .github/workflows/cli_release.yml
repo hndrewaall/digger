@@ -3,8 +3,6 @@ name: release cli
 
 "on":
   pull_request:
-    branches: [ "stacks-support" ]
-    types: [ opened, synchronize ]
 
 jobs:
   binary:
