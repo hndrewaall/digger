@@ -1,7 +1,7 @@
 ---
 name: release cli
 
-on:
+"on":
   pull_request:
     branches: [ "stacks-support" ]
     types: [ opened, synchronize ]
