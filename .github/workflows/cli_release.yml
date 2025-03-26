@@ -5,6 +5,7 @@ name: release cli
   release:
     branches:
       - 'go'
+      - stacks-support
     types:
       - 'released'
 
