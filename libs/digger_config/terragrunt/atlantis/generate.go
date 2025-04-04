@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/gruntwork-io/terragrunt/cli/commands/terraform"
+	"github.com/gruntwork-io/terragrunt/cli/commands/run"
 	"github.com/gruntwork-io/terragrunt/config"
 	"github.com/gruntwork-io/terragrunt/options"
 	"golang.org/x/sync/errgroup"
@@ -346,7 +346,7 @@ func createProject(ignoreParentTerragrunt bool, ignoreDependencyBlocks bool, git
 		return nil, potentialProjectDependencies, err
 	}
 	options.OriginalTerragruntConfigPath = sourcePath
-	options.RunTerragrunt = terraform.Run
+	options.RunTerragrunt = run.Run
 	options.Env = getEnvs()
 
 	// All dependencies depend on their own .hcl file, and any tf files in their directory
@@ -490,7 +490,7 @@ func createHclProject(defaultWorkflow string, defaultApplyRequirements []string,
 	if err != nil {
 		return nil, err
 	}
-	projectHclOptions.RunTerragrunt = terraform.Run
+	projectHclOptions.RunTerragrunt = run.Run
 	projectHclOptions.Env = getEnvs()
 
 	locals, err := parseLocals(projectHclFile, projectHclOptions, nil)
@@ -547,7 +547,7 @@ func createHclProject(defaultWorkflow string, defaultApplyRequirements []string,
 		if err != nil {
 			return nil, err
 		}
-		options.RunTerragrunt = terraform.Run
+		options.RunTerragrunt = run.Run
 		options.Env = getEnvs()
 
 		dependencies, err := getDependencies(ignoreParentTerragrunt, ignoreDependencyBlocks, gitRoot, cascadeDependencies, sourcePath, options)
