@@ -118,7 +118,7 @@ func sliceUnion(a, b []string) []string {
 }
 
 // Parses the terragrunt digger_config at `path` to find all modules it depends on
-func getDependencies(ignoreParentTerragrunt bool, ignoreDependencyBlocks bool, gitRoot string, cascadeDependencies bool, path string, terragruntOptions *options.TerragruntOptions) ([]string, error) {
+func getDependencies(ctx *config.ParsingContext, ignoreParentTerragrunt bool, ignoreDependencyBlocks bool, gitRoot string, cascadeDependencies bool, path string) ([]string, error) {
 	res, err, _ := requestGroup.Do(path, func() (interface{}, error) {
 		// Check if this path has already been computed
 		cachedResult, ok := getDependenciesCache.get(path)
@@ -128,7 +128,7 @@ func getDependencies(ignoreParentTerragrunt bool, ignoreDependencyBlocks bool, g
 
 		// parse the module path to find what it includes, as well as its potential to be a parent
 		// return nils to indicate we should skip this project
-		isParent, includes, err := parseModule(path, terragruntOptions)
+		isParent, includes, err := parseModule(ctx, path)
 		if err != nil {
 			getDependenciesCache.set(path, getDependenciesOutput{nil, err})
 			return nil, err
@@ -152,14 +152,14 @@ func getDependencies(ignoreParentTerragrunt bool, ignoreDependencyBlocks bool, g
 			config.DependenciesBlock,
 			config.TerraformBlock,
 		}
-		parsedConfig, err := config.PartialParseConfigFile(path, terragruntOptions, nil, decodeTypes)
+		parsedConfig, err := config.PartialParseConfigFile(ctx.WithDecodeList(decodeTypes...), path, nil)
 		if err != nil {
 			getDependenciesCache.set(path, getDependenciesOutput{nil, err})
 			return nil, err
 		}
 
 		// Parse out locals
-		locals, err := parseLocals(path, terragruntOptions, nil)
+		locals, err := parseLocals(ctx, path, nil)
 		if err != nil {
 			getDependenciesCache.set(path, getDependenciesOutput{nil, err})
 			return nil, err
@@ -255,8 +255,9 @@ func getDependencies(ignoreParentTerragrunt bool, ignoreDependencyBlocks bool, g
 
 			depPath := dep
 			terrOpts, _ := options.NewTerragruntOptionsWithConfigPath(depPath)
-			terrOpts.OriginalTerragruntConfigPath = terragruntOptions.OriginalTerragruntConfigPath
-			childDeps, err := getDependencies(ignoreParentTerragrunt, ignoreDependencyBlocks, gitRoot, cascadeDependencies, depPath, terrOpts)
+			terrOpts.OriginalTerragruntConfigPath = ctx.TerragruntOptions.OriginalTerragruntConfigPath
+
+			childDeps, err := getDependencies(config.NewParsingContext(ctx, terrOpts), ignoreParentTerragrunt, ignoreDependencyBlocks, gitRoot, cascadeDependencies, depPath)
 			if err != nil {
 				continue
 			}
@@ -338,7 +339,7 @@ func createBaseProject(dir string, workflow string, terraformVersion string, app
 }
 
 // Creates an AtlantisProject for a directory
-func createProject(ignoreParentTerragrunt bool, ignoreDependencyBlocks bool, gitRoot string, cascadeDependencies bool, defaultWorkflow string, defaultApplyRequirements []string, autoPlan bool, defaultTerraformVersion string, createProjectName bool, createWorkspace bool, sourcePath string, triggerProjectsFromDirOnly bool) (*AtlantisProject, []string, error) {
+func createProject(ctx context.Context, ignoreParentTerragrunt bool, ignoreDependencyBlocks bool, gitRoot string, cascadeDependencies bool, defaultWorkflow string, defaultApplyRequirements []string, autoPlan bool, defaultTerraformVersion string, createProjectName bool, createWorkspace bool, sourcePath string, triggerProjectsFromDirOnly bool) (*AtlantisProject, []string, error) {
 	options, err := options.NewTerragruntOptionsWithConfigPath(sourcePath)
 
 	var potentialProjectDependencies []string
@@ -382,7 +383,8 @@ func createProject(ignoreParentTerragrunt bool, ignoreDependencyBlocks bool, git
 		return project, potentialProjectDependencies, nil
 	}
 
-	dependencies, err := getDependencies(ignoreParentTerragrunt, ignoreDependencyBlocks, gitRoot, cascadeDependencies, sourcePath, options)
+	parseCtx := config.NewParsingContext(ctx, nil).WithTerragruntOptions(options)
+	dependencies, err := getDependencies(parseCtx, ignoreParentTerragrunt, ignoreDependencyBlocks, gitRoot, cascadeDependencies, sourcePath)
 	if err != nil {
 		return nil, potentialProjectDependencies, err
 	}
@@ -392,7 +394,7 @@ func createProject(ignoreParentTerragrunt bool, ignoreDependencyBlocks bool, git
 		return nil, potentialProjectDependencies, nil
 	}
 
-	locals, err := parseLocals(sourcePath, options, nil)
+	locals, err := parseLocals(parseCtx, sourcePath, nil)
 	if err != nil {
 		return nil, potentialProjectDependencies, err
 	}
@@ -477,7 +479,7 @@ func projectNameFromDir(projectDir string) string {
 	return projectName
 }
 
-func createHclProject(defaultWorkflow string, defaultApplyRequirements []string, autoplan bool, useProjectMarkers bool, defaultTerraformVersion string, ignoreParentTerragrunt bool, ignoreDependencyBlocks bool, gitRoot string, cascadeDependencies bool, createProjectName bool, createWorkspace bool, sourcePaths []string, workingDir string, projectHcl string) (*AtlantisProject, error) {
+func createHclProject(ctx context.Context, defaultWorkflow string, defaultApplyRequirements []string, autoplan bool, useProjectMarkers bool, defaultTerraformVersion string, ignoreParentTerragrunt bool, ignoreDependencyBlocks bool, gitRoot string, cascadeDependencies bool, createProjectName bool, createWorkspace bool, sourcePaths []string, workingDir string, projectHcl string) (*AtlantisProject, error) {
 	var projectHclDependencies []string
 	var childDependencies []string
 	workflow := defaultWorkflow
@@ -493,7 +495,8 @@ func createHclProject(defaultWorkflow string, defaultApplyRequirements []string,
 	projectHclOptions.RunTerragrunt = run.Run
 	projectHclOptions.Env = getEnvs()
 
-	locals, err := parseLocals(projectHclFile, projectHclOptions, nil)
+	parseCtx := config.NewParsingContext(ctx, nil).WithTerragruntOptions(projectHclOptions)
+	locals, err := parseLocals(parseCtx, projectHclFile, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -541,7 +544,7 @@ func createHclProject(defaultWorkflow string, defaultApplyRequirements []string,
 		terraformVersion = locals.TerraformVersion
 	}
 
-	// build dependencies for terragrunt childs in directories below project hcl file
+	// build dependencies for terragrunt children in directories below project hcl file
 	for _, sourcePath := range sourcePaths {
 		options, err := options.NewTerragruntOptionsWithConfigPath(sourcePath)
 		if err != nil {
@@ -550,7 +553,7 @@ func createHclProject(defaultWorkflow string, defaultApplyRequirements []string,
 		options.RunTerragrunt = run.Run
 		options.Env = getEnvs()
 
-		dependencies, err := getDependencies(ignoreParentTerragrunt, ignoreDependencyBlocks, gitRoot, cascadeDependencies, sourcePath, options)
+		dependencies, err := getDependencies(parseCtx.WithTerragruntOptions(options), ignoreParentTerragrunt, ignoreDependencyBlocks, gitRoot, cascadeDependencies, sourcePath)
 		if err != nil {
 			return nil, err
 		}
@@ -772,7 +775,7 @@ func Parse(gitRoot string, projectHclFiles []string, createHclProjectExternalChi
 
 				errGroup.Go(func() error {
 					defer sem.Release(1)
-					project, projDeps, err := createProject(ignoreParentTerragrunt, ignoreDependencyBlocks, gitRoot, cascadeDependencies, defaultWorkflow, defaultApplyRequirements, autoPlan, defaultTerraformVersion, createProjectName, createWorkspace, terragruntPath, triggerProjectsFromDirOnly)
+					project, projDeps, err := createProject(ctx, ignoreParentTerragrunt, ignoreDependencyBlocks, gitRoot, cascadeDependencies, defaultWorkflow, defaultApplyRequirements, autoPlan, defaultTerraformVersion, createProjectName, createWorkspace, terragruntPath, triggerProjectsFromDirOnly)
 					if err != nil {
 						return err
 					}
@@ -831,7 +834,7 @@ func Parse(gitRoot string, projectHclFiles []string, createHclProjectExternalChi
 
 			errGroup.Go(func() error {
 				defer sem.Release(1)
-				project, err := createHclProject(defaultWorkflow, defaultApplyRequirements, autoPlan, useProjectMarkers, defaultTerraformVersion, ignoreParentTerragrunt, ignoreDependencyBlocks, gitRoot, cascadeDependencies, createProjectName, createWorkspace, terragruntFiles, workingDir, projectHcl)
+				project, err := createHclProject(ctx, defaultWorkflow, defaultApplyRequirements, autoPlan, useProjectMarkers, defaultTerraformVersion, ignoreParentTerragrunt, ignoreDependencyBlocks, gitRoot, cascadeDependencies, createProjectName, createWorkspace, terragruntFiles, workingDir, projectHcl)
 				if err != nil {
 					return err
 				}

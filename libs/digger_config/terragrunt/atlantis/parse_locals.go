@@ -5,12 +5,9 @@ package atlantis
 // parses the `locals` blocks and evaluates their contents.
 
 import (
-	"github.com/gruntwork-io/go-commons/errors"
 	"github.com/gruntwork-io/terragrunt/config"
-	"github.com/gruntwork-io/terragrunt/options"
+	"github.com/gruntwork-io/terragrunt/config/hclparse"
 	"github.com/gruntwork-io/terragrunt/util"
-	"github.com/hashicorp/hcl/v2"
-	"github.com/hashicorp/hcl/v2/hclparse"
 	"github.com/zclconf/go-cty/cty"
 
 	"path/filepath"
@@ -38,33 +35,6 @@ type ResolvedLocals struct {
 
 	// If set to true, create Atlantis project
 	markedProject *bool
-}
-
-// parseHcl uses the HCL2 parser to parse the given string into an HCL file body.
-func parseHcl(parser *hclparse.Parser, hcl string, filename string) (file *hcl.File, err error) {
-	// The HCL2 parser and especially cty conversions will panic in many types of errors, so we have to recover from
-	// those panics here and convert them to normal errors
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = errors.WithStackTrace(config.PanicWhileParsingConfig{RecoveredValue: recovered, ConfigFile: filename})
-		}
-	}()
-
-	if filepath.Ext(filename) == ".json" {
-		file, parseDiagnostics := parser.ParseJSON([]byte(hcl), filename)
-		if parseDiagnostics != nil && parseDiagnostics.HasErrors() {
-			return nil, parseDiagnostics
-		}
-
-		return file, nil
-	}
-
-	file, parseDiagnostics := parser.ParseHCL([]byte(hcl), filename)
-	if parseDiagnostics != nil && parseDiagnostics.HasErrors() {
-		return nil, parseDiagnostics
-	}
-
-	return file, nil
 }
 
 // Merges in values from a child into a parent set of `local` values
@@ -99,7 +69,7 @@ func mergeResolvedLocals(parent ResolvedLocals, child ResolvedLocals) ResolvedLo
 }
 
 // Parses a given file, returning a map of all it's `local` values
-func parseLocals(path string, terragruntOptions *options.TerragruntOptions, includeFromChild *config.IncludeConfig) (ResolvedLocals, error) {
+func parseLocals(ctx *config.ParsingContext, path string, includeFromChild *config.IncludeConfig) (ResolvedLocals, error) {
 	configString, err := util.ReadFileAsString(path)
 	if err != nil {
 		return ResolvedLocals{}, err
@@ -107,13 +77,13 @@ func parseLocals(path string, terragruntOptions *options.TerragruntOptions, incl
 
 	// Parse the HCL string into an AST body
 	parser := hclparse.NewParser()
-	file, err := parseHcl(parser, configString, path)
+	file, err := parser.ParseFromString(configString, path)
 	if err != nil {
 		return ResolvedLocals{}, err
 	}
 
 	// Decode just the Base blocks. See the function docs for DecodeBaseBlocks for more info on what base blocks are.
-	extensions, err := config.DecodeBaseBlocks(terragruntOptions, parser, file, path, includeFromChild, nil)
+	extensions, err := config.DecodeBaseBlocks(ctx, file, includeFromChild)
 	if err != nil {
 		return ResolvedLocals{}, err
 	}
@@ -124,7 +94,7 @@ func parseLocals(path string, terragruntOptions *options.TerragruntOptions, incl
 	mergedParentLocals := ResolvedLocals{}
 	if trackInclude != nil && includeFromChild == nil {
 		for _, includeConfig := range trackInclude.CurrentList {
-			parentLocals, _ := parseLocals(includeConfig.Path, terragruntOptions, &includeConfig)
+			parentLocals, _ := parseLocals(ctx, includeConfig.Path, &includeConfig)
 			mergedParentLocals = mergeResolvedLocals(mergedParentLocals, parentLocals)
 		}
 	}
